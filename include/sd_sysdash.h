@@ -6,8 +6,8 @@
 #include <stdint.h>
 
 #define SD_MAX_MODS 32
-#define SD_MAX_LOGS 32
-#define SD_MAX_TITLES 32
+#define SD_MAX_LOGS 64
+#define SD_MAX_TITLES 128
 #define SD_PATH_MAX 512
 
 typedef struct {

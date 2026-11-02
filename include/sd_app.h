@@ -5,6 +5,8 @@
 #include "pk_platform.h"
 #include "sd_sysdash.h"
 
+#define SD_VISIBLE_ROWS 8
+
 typedef enum {
     SD_TAB_MODS = 0,
     SD_TAB_LOGS = 1,
@@ -16,8 +18,11 @@ typedef struct {
     sd_telemetry_t telemetry;
     sd_tab_t active_tab;
     int selected_mod;
+    int scroll_mod;
     int selected_log;
+    int scroll_log;
     int selected_title;
+    int scroll_title;
     char status_msg[128];
 } sd_app_t;
 

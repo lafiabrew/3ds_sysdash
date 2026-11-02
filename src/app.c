@@ -3,6 +3,63 @@
 #include <stdio.h>
 #include <string.h>
 
+static void sync_scroll_window(int selected, int total, int visible, int *inout_scroll) {
+    if (inout_scroll == NULL) return;
+    if (total <= visible || selected < 0) {
+        *inout_scroll = 0;
+        return;
+    }
+    if (selected < *inout_scroll) {
+        *inout_scroll = selected;
+    } else if (selected >= *inout_scroll + visible) {
+        *inout_scroll = selected - visible + 1;
+    }
+    if (*inout_scroll > total - visible) {
+        *inout_scroll = total - visible;
+    }
+    if (*inout_scroll < 0) {
+        *inout_scroll = 0;
+    }
+}
+
+static void step_list_nav(const pk_input_t *in, int total, int *inout_sel, int *inout_scroll, bool *out_act) {
+    if (out_act != NULL) *out_act = (in->down & PK_BTN_A) != 0;
+    if (total <= 0) {
+        *inout_sel = 0;
+        *inout_scroll = 0;
+        return;
+    }
+    if (in->down & PK_BTN_DUP) {
+        *inout_sel = (*inout_sel > 0) ? (*inout_sel - 1) : (total - 1);
+    }
+    if (in->down & PK_BTN_DDOWN) {
+        *inout_sel = (*inout_sel + 1 < total) ? (*inout_sel + 1) : 0;
+    }
+    /* D-Pad Left / Right = Page Up / Page Down (8 rows at a time) */
+    if (in->down & PK_BTN_DLEFT) {
+        *inout_sel -= SD_VISIBLE_ROWS;
+        if (*inout_sel < 0) *inout_sel = 0;
+    }
+    if (in->down & PK_BTN_DRIGHT) {
+        *inout_sel += SD_VISIBLE_ROWS;
+        if (*inout_sel >= total) *inout_sel = total - 1;
+    }
+    sync_scroll_window(*inout_sel, total, SD_VISIBLE_ROWS, inout_scroll);
+
+    if (in->touch_just_pressed && in->touch_y >= 36 && in->touch_y < 36 + SD_VISIBLE_ROWS * 20) {
+        int vis_row = (in->touch_y - 36) / 20;
+        int idx = *inout_scroll + vis_row;
+        if (idx >= 0 && idx < total) {
+            if (*inout_sel == idx && out_act != NULL) {
+                *out_act = true;
+            } else {
+                *inout_sel = idx;
+            }
+        }
+    }
+    sync_scroll_window(*inout_sel, total, SD_VISIBLE_ROWS, inout_scroll);
+}
+
 void sd_app_init(sd_app_t *app, const char *sd_root) {
     if (app == NULL) return;
     memset(app, 0, sizeof(*app));
@@ -12,6 +69,7 @@ void sd_app_init(sd_app_t *app, const char *sd_root) {
     snprintf(app->status_msg, sizeof(app->status_msg),
              "MODS:%d LOGS:%d TITLES:%d (SEL: PURGE BLACK BOXES)",
              app->telemetry.mod_count, app->telemetry.log_count, app->telemetry.title_count);
+    pk_log_event(app->sd_root, "sysdash", "INFO", app->status_msg);
 }
 
 void sd_app_step(sd_app_t *app, const pk_input_t *in) {
@@ -29,65 +87,41 @@ void sd_app_step(sd_app_t *app, const pk_input_t *in) {
         else app->active_tab = SD_TAB_TITLES;
     }
 
+    bool trigger_act = false;
     if (app->active_tab == SD_TAB_MODS) {
-        if ((in->down & PK_BTN_DUP) && app->selected_mod > 0) {
-            app->selected_mod--;
-        }
-        if ((in->down & PK_BTN_DDOWN) && app->selected_mod + 1 < app->telemetry.mod_count) {
-            app->selected_mod++;
-        }
-
-        bool toggle = (in->down & PK_BTN_A) != 0;
-        if (in->touch_just_pressed && in->touch_y >= 36 && in->touch_y < 196) {
-            int row = (in->touch_y - 36) / 20;
-            if (row >= 0 && row < app->telemetry.mod_count) {
-                app->selected_mod = row;
-                toggle = true;
-            }
-        }
-        if (toggle && app->telemetry.mod_count > 0) {
+        step_list_nav(in, app->telemetry.mod_count, &app->selected_mod, &app->scroll_mod, &trigger_act);
+        if (trigger_act && app->telemetry.mod_count > 0) {
             sd_layeredfs_mod_t *m = &app->telemetry.mods[app->selected_mod];
             if (sd_toggle_layeredfs_mod(app->sd_root, m)) {
                 snprintf(app->status_msg, sizeof(app->status_msg),
                          "MOD %s -> %s", m->title_id, m->enabled ? "ENABLED" : "DISABLED");
+                pk_log_event(app->sd_root, "sysdash", "INFO", app->status_msg);
             } else {
                 snprintf(app->status_msg, sizeof(app->status_msg),
                          "ERR TOGGLING %s", m->title_id);
+                pk_log_event(app->sd_root, "sysdash", "ERROR", app->status_msg);
             }
         }
     } else if (app->active_tab == SD_TAB_LOGS) {
-        if ((in->down & PK_BTN_DUP) && app->selected_log > 0) {
-            app->selected_log--;
-        }
-        if ((in->down & PK_BTN_DDOWN) && app->selected_log + 1 < app->telemetry.log_count) {
-            app->selected_log++;
-        }
+        step_list_nav(in, app->telemetry.log_count, &app->selected_log, &app->scroll_log, NULL);
     } else if (app->active_tab == SD_TAB_TITLES) {
-        if ((in->down & PK_BTN_DUP) && app->selected_title > 0) {
-            app->selected_title--;
-        }
-        if ((in->down & PK_BTN_DDOWN) && app->selected_title + 1 < app->telemetry.title_count) {
-            app->selected_title++;
-        }
-        bool del = (in->down & PK_BTN_A) != 0;
-        if (in->touch_just_pressed && in->touch_y >= 36 && in->touch_y < 196) {
-            int row = (in->touch_y - 36) / 20;
-            if (row >= 0 && row < app->telemetry.title_count) {
-                app->selected_title = row;
-            }
-        }
-        if (del && app->telemetry.title_count > 0) {
+        step_list_nav(in, app->telemetry.title_count, &app->selected_title, &app->scroll_title, &trigger_act);
+        if (trigger_act && app->telemetry.title_count > 0) {
             uint64_t tid = app->telemetry.titles[app->selected_title].title_id;
             if (sd_delete_sd_title(tid)) {
                 sd_scan_sd_card(app->sd_root, &app->telemetry);
                 if (app->selected_title >= app->telemetry.title_count && app->selected_title > 0) {
                     app->selected_title--;
                 }
+                sync_scroll_window(app->selected_title, app->telemetry.title_count,
+                                   SD_VISIBLE_ROWS, &app->scroll_title);
                 snprintf(app->status_msg, sizeof(app->status_msg),
                          "DELETED TITLE %016llX + TICKET!", (unsigned long long)tid);
+                pk_log_event(app->sd_root, "sysdash", "INFO", app->status_msg);
             } else {
                 snprintf(app->status_msg, sizeof(app->status_msg),
-                         "CANNOT DELETE ACTIVE SYSDASH TITLE");
+                         "PROTECTED: CANNOT DELETE ACTIVE SYSDASH");
+                pk_log_event(app->sd_root, "sysdash", "WARN", app->status_msg);
             }
         }
     }
@@ -97,9 +131,11 @@ void sd_app_step(sd_app_t *app, const pk_input_t *in) {
         if (sd_export_diagnostic_snapshot(app->sd_root, &app->telemetry, json_out, sizeof(json_out))) {
             snprintf(app->status_msg, sizeof(app->status_msg),
                      "SAVED: 3DS/SYSDASH/DIAGNOSTIC_SNAPSHOT.JSON");
+            pk_log_event(app->sd_root, "sysdash", "INFO", app->status_msg);
         } else {
             snprintf(app->status_msg, sizeof(app->status_msg),
                      "ERR EXPORTING DIAGNOSTIC SNAPSHOT");
+            pk_log_event(app->sd_root, "sysdash", "ERROR", app->status_msg);
         }
     }
     if (in->down & PK_BTN_Y) {
@@ -107,12 +143,16 @@ void sd_app_step(sd_app_t *app, const pk_input_t *in) {
         snprintf(app->status_msg, sizeof(app->status_msg),
                  "RESCANNED: %d MODS, %d LOGS, %d TITLES",
                  app->telemetry.mod_count, app->telemetry.log_count, app->telemetry.title_count);
+        pk_log_event(app->sd_root, "sysdash", "INFO", app->status_msg);
     }
     if (in->down & PK_BTN_SELECT) {
         int purged = sd_purge_stale_homebrew_titles();
         sd_scan_sd_card(app->sd_root, &app->telemetry);
+        app->selected_title = 0;
+        app->scroll_title = 0;
         snprintf(app->status_msg, sizeof(app->status_msg),
                  "PURGED %d BLACK-BOX TITLES & TICKETS!", purged);
+        pk_log_event(app->sd_root, "sysdash", "INFO", app->status_msg);
     }
 }
 
@@ -175,8 +215,10 @@ void sd_app_render(const sd_app_t *app) {
                      line);
         snprintf(line, sizeof(line), "SIZE: %u KB | VER: %u | %s",
                  (unsigned)ti->size_kb, (unsigned)ti->version,
-                 ti->is_legacy_blackbox ? "LEGACY BLACK-BOX SLOT (PRESS A TO DELETE)" : "INSTALLED SD TITLE");
+                 ti->is_legacy_blackbox ? "BLACK-BOX / 0KB CANDIDATE (A: DELETE)" : "INSTALLED SD TITLE");
         pk_draw_text(14, 102, 0.43f, PK_RGBA8(230, 235, 245, 255), line);
+        pk_draw_text(14, 124, 0.42f, PK_RGBA8(175, 210, 245, 255),
+                     "U/D: 1 ROW | L/R D-PAD: PAGE JUMP (8 ROWS) | A: DELETE");
     }
 
     pk_draw_text(14, 184, 0.43f, PK_RGBA8(250, 215, 110, 255),
@@ -185,7 +227,7 @@ void sd_app_render(const sd_app_t *app) {
     pk_draw_rect(0, 216, 400, 24, PK_RGBA8(22, 32, 52, 255));
     pk_draw_text(8, 222, 0.44f, PK_RGBA8(120, 245, 170, 255), app->status_msg);
 
-    /* Bottom Screen (320x240) */
+    /* Bottom Screen (320x240) with Sliding 8-Row Viewport + Scrollbar */
     pk_render_begin_target(PK_TARGET_BOTTOM, PK_RGBA8(14, 18, 30, 255));
     static const char *const k_tabs[3] = { "L:MODS", "LOGS", "TITLES:R" };
     for (int tb = 0; tb < 3; tb++) {
@@ -195,42 +237,55 @@ void sd_app_render(const sd_app_t *app) {
     }
 
     if (app->active_tab == SD_TAB_MODS) {
-        for (int i = 0; i < t->mod_count && i < 8; i++) {
-            float y = 36.0f + (float)i * 20.0f;
-            bool sel = (i == app->selected_mod);
-            pk_draw_rect(6.0f, y, 308.0f, 18.0f,
+        for (int row = 0; row < SD_VISIBLE_ROWS; row++) {
+            int idx = app->scroll_mod + row;
+            if (idx >= t->mod_count) break;
+            float y = 36.0f + (float)row * 20.0f;
+            bool sel = (idx == app->selected_mod);
+            pk_draw_rect(6.0f, y, 300.0f, 18.0f,
                          sel ? PK_RGBA8(60, 110, 190, 255) : PK_RGBA8(24, 32, 50, 255));
-            snprintf(line, sizeof(line), "[%s] %s %.18s",
-                     t->mods[i].enabled ? "ON " : "OFF",
-                     t->mods[i].title_id, t->mods[i].title_name);
+            snprintf(line, sizeof(line), "[%s] %s %.16s",
+                     t->mods[idx].enabled ? "ON " : "OFF",
+                     t->mods[idx].title_id, t->mods[idx].title_name);
             pk_draw_text(10.0f, y + 4.0f, 0.42f, PK_RGBA8(240, 245, 255, 255), line);
         }
+        pk_draw_scrollbar(310.0f, 36.0f, 158.0f, t->mod_count, SD_VISIBLE_ROWS, app->scroll_mod,
+                          PK_RGBA8(24, 34, 52, 255), PK_RGBA8(95, 175, 255, 255));
     } else if (app->active_tab == SD_TAB_LOGS) {
-        for (int i = 0; i < t->log_count && i < 8; i++) {
-            float y = 36.0f + (float)i * 20.0f;
-            bool sel = (i == app->selected_log);
-            pk_draw_rect(6.0f, y, 308.0f, 18.0f,
+        for (int row = 0; row < SD_VISIBLE_ROWS; row++) {
+            int idx = app->scroll_log + row;
+            if (idx >= t->log_count) break;
+            float y = 36.0f + (float)row * 20.0f;
+            bool sel = (idx == app->selected_log);
+            pk_draw_rect(6.0f, y, 300.0f, 18.0f,
                          sel ? PK_RGBA8(60, 110, 190, 255) : PK_RGBA8(24, 32, 50, 255));
-            pk_draw_text(10.0f, y + 4.0f, 0.42f, PK_RGBA8(240, 245, 255, 255), t->logs[i].rel_path);
+            pk_draw_text(10.0f, y + 4.0f, 0.42f, PK_RGBA8(240, 245, 255, 255), t->logs[idx].rel_path);
         }
+        pk_draw_scrollbar(310.0f, 36.0f, 158.0f, t->log_count, SD_VISIBLE_ROWS, app->scroll_log,
+                          PK_RGBA8(24, 34, 52, 255), PK_RGBA8(95, 175, 255, 255));
     } else {
-        for (int i = 0; i < t->title_count && i < 8; i++) {
-            float y = 36.0f + (float)i * 20.0f;
-            bool sel = (i == app->selected_title);
-            pk_draw_rect(6.0f, y, 308.0f, 18.0f,
+        for (int row = 0; row < SD_VISIBLE_ROWS; row++) {
+            int idx = app->scroll_title + row;
+            if (idx >= t->title_count) break;
+            float y = 36.0f + (float)row * 20.0f;
+            bool sel = (idx == app->selected_title);
+            pk_draw_rect(6.0f, y, 300.0f, 18.0f,
                          sel ? PK_RGBA8(140, 55, 65, 255) : PK_RGBA8(24, 32, 50, 255));
-            snprintf(line, sizeof(line), "%s %016llX (%s)",
-                     t->titles[i].is_legacy_blackbox ? "[OLD]" : "[APP]",
-                     (unsigned long long)t->titles[i].title_id,
-                     t->titles[i].product_code);
-            pk_draw_text(10.0f, y + 4.0f, 0.42f,
-                         t->titles[i].is_legacy_blackbox ? PK_RGBA8(255, 190, 175, 255) : PK_RGBA8(230, 245, 255, 255),
+            snprintf(line, sizeof(line), "%02d.%s %016llX (%s)",
+                     idx + 1,
+                     t->titles[idx].is_legacy_blackbox ? "[OLD]" : "[APP]",
+                     (unsigned long long)t->titles[idx].title_id,
+                     t->titles[idx].product_code);
+            pk_draw_text(10.0f, y + 4.0f, 0.41f,
+                         t->titles[idx].is_legacy_blackbox ? PK_RGBA8(255, 190, 175, 255) : PK_RGBA8(230, 245, 255, 255),
                          line);
         }
+        pk_draw_scrollbar(310.0f, 36.0f, 158.0f, t->title_count, SD_VISIBLE_ROWS, app->scroll_title,
+                          PK_RGBA8(24, 34, 52, 255), PK_RGBA8(255, 130, 120, 255));
     }
 
-    pk_draw_text(8.0f, 218.0f, 0.42f, PK_RGBA8(170, 195, 225, 255),
-                 "SELECT: PURGE ALL [OLD] | A: TOGGLE / DELETE");
+    pk_draw_text(8.0f, 218.0f, 0.41f, PK_RGBA8(170, 195, 225, 255),
+                 "U/D:SCROLL | L/R:PAGE | SEL:PURGE [OLD] | A:ACT");
 
     pk_render_end_frame();
 }

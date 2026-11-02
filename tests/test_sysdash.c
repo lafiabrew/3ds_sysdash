@@ -127,17 +127,50 @@ int main(void) {
     assert(strstr(json_buf, "DATA_ABORT") != NULL);
     assert(strstr(json_buf, "errdisp.txt") != NULL);
 
-    /* Test UI step & render */
+    /* Test UI step, TITLES tab scrolling (>8 rows), and render */
     assert(pk_platform_init());
     sd_app_t app;
     sd_app_init(&app, sd_root);
+    /* Verify [OLD] black-box candidates are sorted to the top of TITLES */
+    assert(app.telemetry.title_count == 14);
+    assert(app.telemetry.titles[0].is_legacy_blackbox == true);
+    assert(app.telemetry.titles[1].is_legacy_blackbox == true);
+
     pk_input_t in;
     memset(&in, 0, sizeof(in));
     in.down = PK_BTN_A | PK_BTN_X;
     sd_app_step(&app, &in);
     sd_app_render(&app);
+
+    /* Switch to TITLES tab (2 R presses) and scroll down 10 rows to verify scroll_title advances */
+    memset(&in, 0, sizeof(in));
+    in.down = PK_BTN_R;
+    sd_app_step(&app, &in);
+    sd_app_step(&app, &in);
+    assert(app.active_tab == SD_TAB_TITLES);
+    for (int step = 0; step < 10; step++) {
+        memset(&in, 0, sizeof(in));
+        in.down = PK_BTN_DDOWN;
+        sd_app_step(&app, &in);
+    }
+    assert(app.selected_title == 10);
+    assert(app.scroll_title == 3); /* 10 - 8 + 1 = 3 */
+    sd_app_render(&app);
+
+    /* Fail-the-Fail negative assertions: NULL pointers, nonexistent paths, traversal log names */
+    assert(sd_scan_sd_card(NULL, &t) == false);
+    assert(sd_scan_sd_card(sd_root, NULL) == false);
+    assert(sd_toggle_layeredfs_mod(NULL, &t.mods[0]) == false);
+    sd_layeredfs_mod_t empty_mod;
+    memset(&empty_mod, 0, sizeof(empty_mod));
+    assert(sd_toggle_layeredfs_mod(sd_root, &empty_mod) == false);
+    assert(sd_parse_log_or_dump("build/test_sd/nonexistent.dmp", json_buf, sizeof(json_buf)) == false);
+    assert(pk_log_event(sd_root, "../bad", "ERROR", "traversal") == false);
+
+    struct stat log_st;
+    assert(stat("build/test_sd/3ds/logs/sysdash.log", &log_st) == 0 && log_st.st_size > 20);
     pk_platform_shutdown();
 
-    printf("PASS: test_sysdash all LayeredFS toggle, crash dump parser, and snapshot checks succeeded.\n");
+    printf("PASS: test_sysdash all LayeredFS toggle, title scroll, pass/fail, and log checks succeeded.\n");
     return 0;
 }

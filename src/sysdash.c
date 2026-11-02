@@ -212,6 +212,27 @@ static void scan_logs_recursive(const char *sd_root, const char *rel_dir, int de
     closedir(d);
 }
 
+static void sort_installed_titles(sd_installed_title_t *arr, int n) {
+    /* Sort legacy/0KB black-box titles first, then homebrew (0x0D3*), then by TitleID */
+    for (int i = 0; i < n; i++) {
+        for (int j = i + 1; j < n; j++) {
+            bool swap = false;
+            if (arr[j].is_legacy_blackbox && !arr[i].is_legacy_blackbox) {
+                swap = true;
+            } else if (arr[j].is_legacy_blackbox == arr[i].is_legacy_blackbox) {
+                if (arr[j].title_id < arr[i].title_id) {
+                    swap = true;
+                }
+            }
+            if (swap) {
+                sd_installed_title_t tmp = arr[i];
+                arr[i] = arr[j];
+                arr[j] = tmp;
+            }
+        }
+    }
+}
+
 bool sd_scan_sd_card(const char *sd_root, sd_telemetry_t *out) {
     if (sd_root == NULL || out == NULL) {
         return false;
@@ -296,8 +317,8 @@ bool sd_scan_sd_card(const char *sd_root, sd_telemetry_t *out) {
                 char pcode[16];
                 memset(pcode, 0, sizeof(pcode));
                 AM_GetTitleProductCode(MEDIATYPE_SD, tid, pcode);
-                /* Put legacy 0x0D3D* black-box test titles at the front of the list */
-                bool is_legacy = (uid >= 0x0D3D0u && uid <= 0x0D3DFu);
+                /* Mark legacy 0x0D3D* test titles OR 0-byte corrupted titles as black-box candidates */
+                bool is_legacy = (uid >= 0x0D3D0u && uid <= 0x0D3DFu) || (infos[i].size == 0ULL);
                 int idx = out->title_count++;
                 sd_installed_title_t entry;
                 memset(&entry, 0, sizeof(entry));
@@ -309,23 +330,25 @@ bool sd_scan_sd_card(const char *sd_root, sd_telemetry_t *out) {
                 entry.is_legacy_blackbox = is_legacy;
                 out->titles[idx] = entry;
             }
+            sort_installed_titles(out->titles, out->title_count);
         }
         free(tids);
         free(infos);
     }
 #else
-    out->title_count = 2;
-    out->titles[0].title_id = 0x00040000000D3D10ULL;
-    snprintf(out->titles[0].product_code, sizeof(out->titles[0].product_code), "CTR-P-PKDS");
-    out->titles[0].size_kb = 196;
-    out->titles[0].version = 1;
-    out->titles[0].is_legacy_blackbox = true;
-
-    out->titles[1].title_id = 0x00040000000D3E10ULL;
-    snprintf(out->titles[1].product_code, sizeof(out->titles[1].product_code), "CTR-P-PKDS");
-    out->titles[1].size_kb = 198;
-    out->titles[1].version = 3;
-    out->titles[1].is_legacy_blackbox = false;
+    out->title_count = 14;
+    for (int i = 0; i < 14; i++) {
+        bool is_old = (i == 4 || i == 9);
+        out->titles[i].title_id = is_old
+                                      ? (0x00040000000D3D00ULL + (uint64_t)i * 0x10ULL)
+                                      : (0x00040000000D3E00ULL + (uint64_t)i * 0x10ULL);
+        snprintf(out->titles[i].product_code, sizeof(out->titles[i].product_code),
+                 is_old ? "CTR-P-OLD%d" : "CTR-P-APP%d", i);
+        out->titles[i].size_kb = is_old ? 0u : (uint32_t)(180 + i * 10);
+        out->titles[i].version = is_old ? 1u : 3u;
+        out->titles[i].is_legacy_blackbox = is_old;
+    }
+    sort_installed_titles(out->titles, out->title_count);
 #endif
 
     return true;
