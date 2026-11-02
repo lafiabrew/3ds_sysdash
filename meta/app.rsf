@@ -114,6 +114,8 @@ AccessControlInfo:
    - APT:U
    - ac:u
    - am:net
+   - am:u
+   - am:sys
    - boss:U
    - cam:u
    - cecd:u

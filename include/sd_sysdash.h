@@ -7,7 +7,16 @@
 
 #define SD_MAX_MODS 32
 #define SD_MAX_LOGS 32
+#define SD_MAX_TITLES 32
 #define SD_PATH_MAX 512
+
+typedef struct {
+    uint64_t title_id;
+    char product_code[16];
+    uint32_t size_kb;
+    uint16_t version;
+    bool is_legacy_blackbox;
+} sd_installed_title_t;
 
 typedef struct {
     char title_id[20];
@@ -41,6 +50,8 @@ typedef struct {
     int mod_count;
     sd_log_entry_t logs[SD_MAX_LOGS];
     int log_count;
+    sd_installed_title_t titles[SD_MAX_TITLES];
+    int title_count;
 } sd_telemetry_t;
 
 /* Map a 16-hex-char 3DS TitleID to a human-readable Pokémon/3DS title name */
@@ -60,5 +71,8 @@ bool sd_export_diagnostic_snapshot(const char *sd_root, const sd_telemetry_t *t,
 
 /* Purge stale/black-square test titles (0x00040000000D3D00..0x00040000000D3DF0) and pending imports via AM */
 int sd_purge_stale_homebrew_titles(void);
+
+/* Delete a specific installed SD user title + ticket by 64-bit TitleID */
+bool sd_delete_sd_title(uint64_t title_id);
 
 #endif /* SD_SYSDASH_H */

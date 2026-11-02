@@ -280,6 +280,54 @@ bool sd_scan_sd_card(const char *sd_root, sd_telemetry_t *out) {
     scan_logs_recursive(sd_root, "luma", 0, out);
     scan_logs_recursive(sd_root, "3ds", 0, out);
 
+#ifdef __3DS__
+    u32 sd_title_count = 0;
+    if (R_SUCCEEDED(AM_GetTitleCount(MEDIATYPE_SD, &sd_title_count)) && sd_title_count > 0) {
+        u32 cap = sd_title_count > 128u ? 128u : sd_title_count;
+        u64 *tids = (u64 *)calloc(cap, sizeof(u64));
+        AM_TitleEntry *infos = (AM_TitleEntry *)calloc(cap, sizeof(AM_TitleEntry));
+        u32 read_count = 0;
+        if (tids != NULL && infos != NULL &&
+            R_SUCCEEDED(AM_GetTitleList(&read_count, MEDIATYPE_SD, cap, tids))) {
+            AM_GetTitleInfo(MEDIATYPE_SD, read_count, tids, infos);
+            for (u32 i = 0; i < read_count && out->title_count < SD_MAX_TITLES; i++) {
+                u64 tid = tids[i];
+                u32 uid = (u32)((tid >> 8) & 0xFFFFFu);
+                char pcode[16];
+                memset(pcode, 0, sizeof(pcode));
+                AM_GetTitleProductCode(MEDIATYPE_SD, tid, pcode);
+                /* Put legacy 0x0D3D* black-box test titles at the front of the list */
+                bool is_legacy = (uid >= 0x0D3D0u && uid <= 0x0D3DFu);
+                int idx = out->title_count++;
+                sd_installed_title_t entry;
+                memset(&entry, 0, sizeof(entry));
+                entry.title_id = tid;
+                snprintf(entry.product_code, sizeof(entry.product_code), "%s",
+                         pcode[0] ? pcode : "CTR-P-HOME");
+                entry.size_kb = (uint32_t)((infos[i].size + 1023ULL) / 1024ULL);
+                entry.version = infos[i].version;
+                entry.is_legacy_blackbox = is_legacy;
+                out->titles[idx] = entry;
+            }
+        }
+        free(tids);
+        free(infos);
+    }
+#else
+    out->title_count = 2;
+    out->titles[0].title_id = 0x00040000000D3D10ULL;
+    snprintf(out->titles[0].product_code, sizeof(out->titles[0].product_code), "CTR-P-PKDS");
+    out->titles[0].size_kb = 196;
+    out->titles[0].version = 1;
+    out->titles[0].is_legacy_blackbox = true;
+
+    out->titles[1].title_id = 0x00040000000D3E10ULL;
+    snprintf(out->titles[1].product_code, sizeof(out->titles[1].product_code), "CTR-P-PKDS");
+    out->titles[1].size_kb = 198;
+    out->titles[1].version = 3;
+    out->titles[1].is_legacy_blackbox = false;
+#endif
+
     return true;
 }
 
@@ -392,9 +440,28 @@ bool sd_export_diagnostic_snapshot(const char *sd_root, const sd_telemetry_t *t,
 
 int sd_purge_stale_homebrew_titles(void) {
 #ifdef __3DS__
-    /* Legacy UniqueIds (0x0D3D0..0x0D3DF) before the 32-byte CBMD / 0x105 SMDH fix.
-       3DS TitleIDs encode UniqueId in bits 8..27: 0x0004000000000000ULL | ((u64)UniqueId << 8) */
     int removed = 0;
+    u32 sd_title_count = 0;
+    if (R_SUCCEEDED(AM_GetTitleCount(MEDIATYPE_SD, &sd_title_count)) && sd_title_count > 0) {
+        u32 cap = sd_title_count > 128u ? 128u : sd_title_count;
+        u64 *tids = (u64 *)calloc(cap, sizeof(u64));
+        u32 read_count = 0;
+        if (tids != NULL && R_SUCCEEDED(AM_GetTitleList(&read_count, MEDIATYPE_SD, cap, tids))) {
+            for (u32 i = 0; i < read_count; i++) {
+                u64 tid = tids[i];
+                u32 uid = (u32)((tid >> 8) & 0xFFFFFu);
+                if (uid >= 0x0D3D0u && uid <= 0x0D3DFu) {
+                    if (R_SUCCEEDED(AM_DeleteUserTitle(MEDIATYPE_SD, tid)) ||
+                        R_SUCCEEDED(AM_DeleteTitle(MEDIATYPE_SD, tid))) {
+                        removed++;
+                    }
+                    AM_DeleteTicket(tid);
+                    AM_DeletePendingTitle(MEDIATYPE_SD, tid);
+                }
+            }
+        }
+        free(tids);
+    }
     for (uint32_t uid = 0x0D3D0u; uid <= 0x0D3DFu; uid++) {
         u64 tid = 0x0004000000000000ULL | ((u64)uid << 8);
         if (R_SUCCEEDED(AM_DeleteUserTitle(MEDIATYPE_SD, tid))) {
@@ -404,9 +471,26 @@ int sd_purge_stale_homebrew_titles(void) {
         AM_DeletePendingTitle(MEDIATYPE_SD, tid);
     }
     AM_DeleteAllPendingTitles(MEDIATYPE_SD);
+    AM_DeleteAllTemporaryTitles();
     AM_DoCleanup(MEDIATYPE_SD);
     return removed;
 #else
     return 4;
+#endif
+}
+
+bool sd_delete_sd_title(uint64_t title_id) {
+#ifdef __3DS__
+    /* Never delete SysDash itself (0x0D3E2) while running */
+    u32 uid = (u32)((title_id >> 8) & 0xFFFFFu);
+    if (uid == 0x0D3E2u) return false;
+    bool ok = R_SUCCEEDED(AM_DeleteUserTitle(MEDIATYPE_SD, title_id)) ||
+              R_SUCCEEDED(AM_DeleteTitle(MEDIATYPE_SD, title_id));
+    AM_DeleteTicket(title_id);
+    AM_DeletePendingTitle(MEDIATYPE_SD, title_id);
+    return ok;
+#else
+    (void)title_id;
+    return true;
 #endif
 }

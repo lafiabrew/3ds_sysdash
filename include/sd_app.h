@@ -7,7 +7,8 @@
 
 typedef enum {
     SD_TAB_MODS = 0,
-    SD_TAB_LOGS = 1
+    SD_TAB_LOGS = 1,
+    SD_TAB_TITLES = 2
 } sd_tab_t;
 
 typedef struct {
@@ -16,6 +17,7 @@ typedef struct {
     sd_tab_t active_tab;
     int selected_mod;
     int selected_log;
+    int selected_title;
     char status_msg[128];
 } sd_app_t;
 
