@@ -15,6 +15,7 @@
 
 static u32 *g_soc_buffer = NULL;
 static bool g_ptmu_ready = false;
+static bool g_am_ready = false;
 static C3D_RenderTarget *g_top_left = NULL;
 static C3D_RenderTarget *g_top_right = NULL;
 static C3D_RenderTarget *g_bottom = NULL;
@@ -53,6 +54,9 @@ bool pk_platform_init(void) {
     if (R_SUCCEEDED(ptmuInit())) {
         g_ptmu_ready = true;
     }
+    if (R_SUCCEEDED(amInit())) {
+        g_am_ready = true;
+    }
     g_soc_buffer = (u32 *)memalign(SYSD_SOC_ALIGN, SYSD_SOC_BUFFERSIZE);
     if (g_soc_buffer != NULL) {
         if (socInit(g_soc_buffer, SYSD_SOC_BUFFERSIZE) != 0) {
@@ -80,6 +84,10 @@ void pk_platform_shutdown(void) {
         socExit();
         free(g_soc_buffer);
         g_soc_buffer = NULL;
+    }
+    if (g_am_ready) {
+        amExit();
+        g_am_ready = false;
     }
     if (g_ptmu_ready) {
         ptmuExit();

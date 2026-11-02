@@ -58,4 +58,7 @@ bool sd_parse_log_or_dump(const char *full_path, char *out_summary, size_t summa
 /* Export full diagnostic snapshot to <sd_root>/3ds/sysdash/diagnostic_snapshot.json and .log */
 bool sd_export_diagnostic_snapshot(const char *sd_root, const sd_telemetry_t *t, char *out_json_path, size_t cap);
 
+/* Purge stale/black-square test titles (0x00040000000D3D00..0x00040000000D3DF0) and pending imports via AM */
+int sd_purge_stale_homebrew_titles(void);
+
 #endif /* SD_SYSDASH_H */

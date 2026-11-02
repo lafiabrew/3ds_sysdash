@@ -75,6 +75,11 @@ void sd_app_step(sd_app_t *app, const pk_input_t *in) {
                  "RESCANNED: %d MODS, %d LOGS",
                  app->telemetry.mod_count, app->telemetry.log_count);
     }
+    if (in->down & PK_BTN_SELECT) {
+        int purged = sd_purge_stale_homebrew_titles();
+        snprintf(app->status_msg, sizeof(app->status_msg),
+                 "PURGED %d STALE/BLACK-BOX TITLES & TICKETS!", purged);
+    }
 }
 
 void sd_app_render(const sd_app_t *app) {
@@ -129,8 +134,8 @@ void sd_app_render(const sd_app_t *app) {
         pk_draw_text(14, 102, 0.5f, PK_RGBA8(235, 235, 245, 255), l->summary);
     }
 
-    pk_draw_text(14, 184, 0.5f, PK_RGBA8(250, 215, 110, 255),
-                 "A: TOGGLE MOD | X: EXPORT SNAPSHOT JSON | Y: RESCAN SD");
+    pk_draw_text(14, 184, 0.48f, PK_RGBA8(250, 215, 110, 255),
+                 "A: TOGGLE MOD | X: SNAPSHOT | SELECT: PURGE BLACK BOXES");
 
     pk_draw_rect(0, 216, 400, 24, PK_RGBA8(22, 32, 52, 255));
     pk_draw_text(8, 222, 0.5f, PK_RGBA8(120, 245, 170, 255), app->status_msg);

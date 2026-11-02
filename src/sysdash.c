@@ -389,3 +389,24 @@ bool sd_export_diagnostic_snapshot(const char *sd_root, const sd_telemetry_t *t,
     }
     return true;
 }
+
+int sd_purge_stale_homebrew_titles(void) {
+#ifdef __3DS__
+    /* Legacy UniqueIds (0x0D3D0..0x0D3DF) before the 32-byte CBMD / 0x105 SMDH fix.
+       3DS TitleIDs encode UniqueId in bits 8..27: 0x0004000000000000ULL | ((u64)UniqueId << 8) */
+    int removed = 0;
+    for (uint32_t uid = 0x0D3D0u; uid <= 0x0D3DFu; uid++) {
+        u64 tid = 0x0004000000000000ULL | ((u64)uid << 8);
+        if (R_SUCCEEDED(AM_DeleteUserTitle(MEDIATYPE_SD, tid))) {
+            removed++;
+        }
+        AM_DeleteTicket(tid);
+        AM_DeletePendingTitle(MEDIATYPE_SD, tid);
+    }
+    AM_DeleteAllPendingTitles(MEDIATYPE_SD);
+    AM_DoCleanup(MEDIATYPE_SD);
+    return removed;
+#else
+    return 4;
+#endif
+}
