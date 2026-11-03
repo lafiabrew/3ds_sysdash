@@ -6,6 +6,10 @@
   <img src="docs/banner.png" width="256" height="128" alt="3ds_sysdash 3DS banner" />
 </p>
 
+<p align="center">
+  <img src="docs/screenshot.png" width="360" alt="3ds_sysdash dual-screen 3DS preview" />
+</p>
+
 > **System & Mod Manager (`CTR-P-SYSD`, UniqueId `0x0D3E2`)** — Part of the [**lafiabrew**](https://github.com/orgs/lafiabrew/repositories) Nintendo 3DS Homebrew Suite (companion hub: [`lafiabrew/3ds_hub`](https://github.com/lafiabrew/3ds_hub)).
 
 Nintendo 3DS CFW hardware/battery/IP inspector, 1-button Luma3DS LayeredFS ROM-hack mod toggler, crash dump analyzer, and 128-title scrollable manager with 1-button black-box title purging.
